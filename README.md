@@ -1,1 +1,3 @@
 # RigidBody
+
+Attempt to make a simple rigid body simulation... Seems to work alright, buuuuut...
