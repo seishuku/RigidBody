@@ -5,8 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <intrin.h>
-#include "math.h"
-#include "physics.h"
+#include "math/math.h"
+#include "physics/physics.h"
 
 LPDIRECTDRAW7 lpDD=NULL;
 LPDIRECTDRAWSURFACE7 lpDDSFront=NULL;
@@ -24,6 +24,11 @@ unsigned __int64 Frequency, StartTime, EndTime;
 float fTimeStep, fTime=0.0f;
 
 float X=0.0f, Y=0.0f;
+
+#define NUM_BODIES 1000
+
+RigidBody_t bodies[NUM_BODIES];
+RigidBody_t aabb;
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 void Render(void);
@@ -212,8 +217,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			switch(wParam)
 			{
 				case MK_LBUTTON:
-					Bodies[0].position[0]+=(delta.x);
-					Bodies[0].position[1]-=(delta.y);
+					X+=delta.x;
+					Y-=delta.y;
+					if(MouseDrag)
+					{
+						for(uint32_t i=0;i<NUM_BODIES;i++)
+							PhysicsAffect(&bodies[i], Vec3(X, Y, 0.0f), -100000.0f);
+						PhysicsAffect(&aabb, Vec3(X, Y, 0.0f), -100000.0f);
+					}
 					break;
 
 				case MK_MBUTTON:
@@ -229,10 +240,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 			switch(wParam)
 			{
-				case VK_SPACE:
-					explode(Bodies);
-					break;
-
 				case VK_ESCAPE:
 					PostQuitMessage(0);
 					break;
@@ -359,57 +366,70 @@ void Render(void)
 	fb=(uint32_t *)ddsd.lpSurface;
 
 	// Loop through objects, integrate and check/resolve collisions
+	//PhysicsIntegrate(&aabb, fTimeStep);
+
 	for(int i=0;i<NUM_BODIES;i++)
 	{
-		const int subSteps=4;
-		const float inv_subSteps=1.0f/(float)subSteps;
-
-		for(int steps=0;steps<subSteps;steps++)
-			integrate(&Bodies[i], fTimeStep*inv_subSteps);
+		PhysicsIntegrate(&bodies[i], fTimeStep);
 
 		for(int j=i+1;j<NUM_BODIES;j++)
-			sphere_sphere_collision(&Bodies[i], &Bodies[j]);
+			PhysicsSphereToSphereCollisionResponse(&bodies[i], &bodies[j]);
 
-		sphere_aabb_collision(&Bodies[i], &aabb);
+		PhysicsSphereToAABBCollisionResponse(&bodies[i], &aabb);
 	}
 
 	// Draw circles
 	for(int i=0;i<NUM_BODIES;i++)
 	{
 		if(i<3)
-			circle((int)Bodies[i].position[0], (int)Bodies[i].position[1], (int)Bodies[i].radius, MakeRGBA(255, 0, 0, 255));
+			circle((int)bodies[i].position.x, (int)bodies[i].position.y, (int)bodies[i].radius, MakeRGBA(255, 0, 0, 255));
 		else
-			circle((int)Bodies[i].position[0], (int)Bodies[i].position[1], (int)Bodies[i].radius, MakeRGBA(255, 255, 255, 255));
+			circle((int)bodies[i].position.x, (int)bodies[i].position.y, (int)bodies[i].radius, MakeRGBA(255, 255, 255, 255));
+
+		vec3 direction=Vec3_Addv(bodies[i].position, Vec3(bodies[i].radius, 0.0f, 0.0f));
+		Vec3_Normalize(&direction);
+		const vec3 rotated=Vec3_Muls(Matrix3x3MultVec3(direction, QuatToMatrix(bodies[i].orientation)), bodies[i].radius);
+		line((int)bodies[i].position.x, (int)bodies[i].position.y, (int)bodies[i].position.x+rotated.x, (int)bodies[i].position.y+rotated.y, MakeRGBA(255, 0, 0, 255));
 	}
 
 	// Draw AABB
-	line(aabb.position[0]-aabb.size[0]*0.5f,
-		 aabb.position[1]-aabb.size[1]*0.5f,
-		 aabb.position[0]-aabb.size[0]*0.5f,
-		 aabb.position[1]+aabb.size[1]*0.5f, MakeRGBA(255, 255, 255, 255));
-	line(aabb.position[0]+aabb.size[0]*0.5f,
-		 aabb.position[1]-aabb.size[1]*0.5f,
-		 aabb.position[0]+aabb.size[0]*0.5f,
-		 aabb.position[1]+aabb.size[1]*0.5f, MakeRGBA(255, 255, 255, 255));
-	line(aabb.position[0]-aabb.size[0]*0.5f,
-		 aabb.position[1]-aabb.size[1]*0.5f,
-		 aabb.position[0]+aabb.size[0]*0.5f,
-		 aabb.position[1]-aabb.size[1]*0.5f, MakeRGBA(255, 255, 255, 255));
-	line(aabb.position[0]-aabb.size[0]*0.5f,
-		 aabb.position[1]+aabb.size[1]*0.5f,
-		 aabb.position[0]+aabb.size[0]*0.5f,
-		 aabb.position[1]+aabb.size[1]*0.5f, MakeRGBA(255, 255, 255, 255));
+	line(aabb.position.x-aabb.size.x*0.5f,
+		 aabb.position.y-aabb.size.y*0.5f,
+		 aabb.position.x-aabb.size.x*0.5f,
+		 aabb.position.y+aabb.size.y*0.5f, MakeRGBA(255, 255, 255, 255));
+	line(aabb.position.x+aabb.size.x*0.5f,
+		 aabb.position.y-aabb.size.y*0.5f,
+		 aabb.position.x+aabb.size.x*0.5f,
+		 aabb.position.y+aabb.size.y*0.5f, MakeRGBA(255, 255, 255, 255));
+	line(aabb.position.x-aabb.size.x*0.5f,
+		 aabb.position.y-aabb.size.y*0.5f,
+		 aabb.position.x+aabb.size.x*0.5f,
+		 aabb.position.y-aabb.size.y*0.5f, MakeRGBA(255, 255, 255, 255));
+	line(aabb.position.x-aabb.size.x*0.5f,
+		 aabb.position.y+aabb.size.y*0.5f,
+		 aabb.position.x+aabb.size.x*0.5f,
+		 aabb.position.y+aabb.size.y*0.5f, MakeRGBA(255, 255, 255, 255));
+
+	vec3 direction=Vec3_Addv(aabb.position, Vec3(1.0f, 0.0f, 0.0f));
+	Vec3_Normalize(&direction);
+	const vec3 rotated=Vec3_Muls(Matrix3x3MultVec3(direction, QuatToMatrix(aabb.orientation)), aabb.size.x/2.0f);
+	line((int)aabb.position.x, (int)aabb.position.y, (int)aabb.position.x+rotated.x, (int)aabb.position.y+rotated.y, MakeRGBA(255, 0, 0, 255));
 
 	IDirectDrawSurface7_Unlock(lpDDSBack, NULL);
 }
 
 int Init(void)
 {
-	Vec3_Set(aabb.position, (float)Width/2.0f, (float)Height/2.0f, 0.0f);
-	Vec3_Set(aabb.velocity, 0.0f, 0.0f, 0.0f);
-	Vec3_Set(aabb.size, 50.0f, 50.0f, 1.0f);
-	aabb.mass=5000.0f*WORLD_SCALE;
-	aabb.inverse_mass=1.0f/aabb.mass;
+	aabb.position=Vec3((float)Width/2.0f, (float)Height/2.0f, 0.0f);
+	aabb.orientation=Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	aabb.velocity=Vec3b(0.0f);
+	aabb.angularVelocity=Vec3b(0.0f);
+	aabb.force=Vec3b(0.0f);
+	aabb.size=Vec3(50.0f, 50.0f, 50.0f);
+	aabb.mass=10000.0f*WORLD_SCALE;
+	aabb.invMass=1.0f/aabb.mass;
+	aabb.inertia=0.4f*aabb.mass*(aabb.size.x*aabb.size.y);
+	aabb.invInertia=1.0f/aabb.inertia;
 
 	// Seed random number generator
 	srand(42);
@@ -419,28 +439,29 @@ int Init(void)
 	// Initialize fragments with random positions and velocities
 	for(int i=0; i<NUM_BODIES; i++)
 	{
-		memset(&Bodies[i], 0, sizeof(RigidBody_t));
+		memset(&bodies[i], 0, sizeof(RigidBody_t));
 
-		Bodies[i].position[0]=sinf(((float)i/(NUM_BODIES+1))*2.0f*PI)*100.0f+Center[0];
-		Bodies[i].position[1]=cosf(((float)i/(NUM_BODIES+1))*2.0f*PI)*100.0f+Center[1];
-		Bodies[i].position[2]=0.0f;
+		bodies[i].position=Vec3(sinf(((float)i/(NUM_BODIES+1))*2.0f*PI)*100.0f+Center.x, cosf(((float)i/(NUM_BODIES+1))*2.0f*PI)*100.0f+Center.y, 0.0f);
+		bodies[i].orientation=Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+		bodies[i].velocity=Vec3b(0.0f);
+		bodies[i].angularVelocity=Vec3(0.0f, 0.0f, 10.0f);
+		bodies[i].force=Vec3b(0.0f);
 
-		Bodies[i].velocity[0]=0.0f;
-		Bodies[i].velocity[1]=0.0f;
-		Bodies[i].velocity[2]=0.0f;
+		bodies[i].radius=3.0f;//((float)rand()/RAND_MAX)*10.0f+1.0f;
 
-		Bodies[i].radius=10.0f;//((float)rand()/RAND_MAX)*10.0f+1.0f;
+		bodies[i].mass=0.01f*WORLD_SCALE;
+		bodies[i].invMass=1.0f/bodies[i].mass;
 
-		Bodies[i].mass=100.0f*WORLD_SCALE;
-		Bodies[i].inverse_mass=1.0f/Bodies[i].mass;
+		bodies[i].inertia=0.4f*bodies[i].mass*(bodies[i].radius*bodies[i].radius);
+		bodies[i].invInertia=1.0f/bodies[i].inertia;
 	}
 
-	Bodies[0].mass=5000.0f*WORLD_SCALE;
-	Bodies[0].inverse_mass=1.0f/Bodies[0].mass;
-	Bodies[1].mass=5000.0f*WORLD_SCALE;
-	Bodies[1].inverse_mass=1.0f/Bodies[0].mass;
-	Bodies[2].mass=5000.0f*WORLD_SCALE;
-	Bodies[2].inverse_mass=1.0f/Bodies[0].mass;
+	bodies[0].mass=1.0f*WORLD_SCALE;
+	bodies[0].invMass=1.0f/bodies[0].mass;
+	bodies[1].mass=1.0f*WORLD_SCALE;
+	bodies[1].invMass=1.0f/bodies[0].mass;
+	bodies[2].mass=1.0f*WORLD_SCALE;
+	bodies[2].invMass=1.0f/bodies[0].mass;
 
 	return 1;
 }
